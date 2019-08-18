@@ -3,6 +3,7 @@
 <!-- MarkdownTOC -->
 
 - Feature Engine
+- 数值型特征
     - 1.Feature Preprocessing
         - 1.1 异常值处理
             - 1.1.1 异常值出现的原因
@@ -32,6 +33,20 @@
         - 4.2 打包
         - 4.3 嵌入式
     - 5.自动特征工程
+- 类别特征编码
+    - 1.One-Hot Encoding
+    - 2.虚拟编码
+    - 3.效果编码
+    - 4.特征散列化
+    - 5. 分箱计数
+- 文本特征
+    - 4.文本数据特征提取及处理
+        - 4.1 文本特征提取
+            - 4.1.1 词袋
+            - 4.1.2
+        - 4.2 使用过滤获取清洁特征
+            - 4.2.1 停用词
+            - 4.2.2 基于频率的过滤
     - 6.Imbalanced Sample
         - 6.1 过拟合
         - 6.2 欠拟合
@@ -71,13 +86,9 @@
     - 分块
 
 
-
+# 数值型特征
 
 ## 1.Feature Preprocessing
-
-
-
-
 
 ### 1.1 异常值处理
 
@@ -370,6 +381,7 @@ from sklearn.preprocessing import PolynomialFeatures
 ```
 
 
+
 ## 4.Feature Selection
 
 > 特征选择技术可以精简掉无用的特征，以降低最终模型的复杂性，它的最终目的是得到一个简约模型，在不降低预测准确率或对预测准确率影响不大的情况下提高计算速度；
@@ -400,7 +412,183 @@ from sklearn.preprocessing import PolynomialFeatures
 * $L1$ 正则化可以添加到任意线性模型的训练目标中，$L1$ 正则化鼓励模型使用更少的特征，所以也称为稀疏性约束；
     - LASSO
 
+
+
 ## 5.自动特征工程
+
+# 类别特征编码
+
+> * 类别特征中的类别通常不是数值型的，需要使用编码方法将非数值的类别转换为数值
+> * 对于一些模型，本身支持类别型特征，无需编码
+> * 无序类别特征
+> * 有序类别特征
+
+## 1.One-Hot Encoding
+
+* One-Hot Encoding 使用一组比特位，每个比特位表示一种可能的类别，如果特征不能同时属于多个类别，那么这组值中就只有一个比特位是“开”的
+* One-Hot Encoding 的问题是它允许有 k 个自由度，二特征本身只需要 k-1 个自由度
+* One-Hot Encoding 编码有冗余，这会使得同一个问题有多个有效模型，这种非唯一性有时候比较难以理解
+* One-Hot Encoding 的优点是每个特征都对应一个类别，而且可以把缺失数据编码为全零向量，模型输出也是目标变量的总体均值
+
+```python
+from sklearn.preprocessing import OneHotEncoder
+from pandas import get_dummies
+
+import pandas as pd
+
+df = pd.DataFrame({
+    "City": ["SF", "SF", "SF", "NYC", "NYC", "NYC", "Seattle", "Seattle", "Seattle"],
+    "Rent": [3999, 4000, 4001, 3499, 3500, 3501, 2499, 2500, 2501]
+})
+df["Rent"].mean()
+one_hot_df = pd.get_dummies(df, prefix = "city")
+print(one_hot_df)
+```
+
+## 2.虚拟编码
+
+* 虚拟编码在进行表示时只使用 k-1 个自由度，除去了额外的自由度，没有被使用的那个特征通过一个全零向量表示，它称为参照类
+* 使用虚拟编码的模型结果比使用 One-Hot Encoding 的模型结果更具解释性
+* 虚拟编码的缺点是不太容易处理缺失数据，因为全零向量已经映射为参照类了
+
+```python
+import pandas as pd
+
+df = pd.DataFrame({
+    "City": ["SF", "SF", "SF", "NYC", "NYC", "NYC", "Seattle", "Seattle", "Seattle"],
+    "Rent": [3999, 4000, 4001, 3499, 3500, 3501, 2499, 2500, 2501]
+})
+df["Rent"].mean()
+vir_df = pd.get_dummies(df, prefix = "city", drop_first = True)
+print(vir_df)
+```
+
+
+## 3.效果编码
+
+* 效果编码与虚拟编码非常相似，区别在于参照类是用全部由 -1 组成的向量表示的
+* 效果编码的优点是全由-1组成的向量是个密集向量，计算和存储的成本都比较高
+
+```python
+import pandas as pd
+
+df = pd.DataFrame({
+    "City": ["SF", "SF", "SF", "NYC", "NYC", "NYC", "Seattle", "Seattle", "Seattle"],
+    "Rent": [3999, 4000, 4001, 3499, 3500, 3501, 2499, 2500, 2501]
+})
+df["Rent"].mean()
+vir_df = pd.get_dummies(df, prefix = "city", drop_first = True)
+effect_df = vir_df[3:5, ["city_SF", "city_Seattle"]] = -1
+print(effect_df)
+```
+
+## 4.特征散列化
+
+* 散列函数是一种确定性函数，他可以将一个可能无界的整数映射到一个有限的整数范围 $[1, m]$ 中，因为输入域可能大于输出范围，所以可能有多个值被映射为同样的输出，这称为碰撞
+* 均匀散列函数可以确保将大致相同数量的数值映射到 m 个分箱中
+* 如果模型中涉及特征向量和系数的内积运算，那么就可以使用特征散列化
+* 特征散列化的一个缺点是散列后的特征失去了可解释性，只是初始特征的某种聚合
+
+```python
+from sklearn.feature_extraction import FeatureHasher
+
+# 单词特征的特征散列化
+def hash_features(word_list, m):
+    output = [0] * m
+    for word in word_list:
+        index = hash_fcn(word) % m
+        output[index] += 1
+    return output
+
+# 带符号的特征散列化
+def hash_features(word_list, m):
+    output = [0] * m
+    for word in word_list:
+        index = hash_fcn(word) % m
+        sign_bit = sign_hash(word) % 2
+        if sign_bit == 0:
+            output[index] -= 1
+        else:
+            output[index] += 1
+    return output
+
+
+h = FeatureHasher(n_features = m, input_type = "string")
+f = h.trasnform(df["feat"])
+
+```
+
+
+## 5. 分箱计数
+
+
+
+
+
+
+
+# 文本特征
+
+## 4.文本数据特征提取及处理
+
+* 特征提取
+    - 词袋(bag-of-words)
+        + 单词数量的统计列表
+* 特征缩放
+    - tf-idf
+
+### 4.1 文本特征提取
+
+对于文本数据，可以从一个单词数量的统计列表开始，称为词袋(bag-of-words).对于像文本分类这样的简单任务来说，单词数量统计通常就够用了。这种技术还可以用于信息提取，它的目标是提取出一组与查询文本相关的文档。这两种任务都可以凭借单词级别的特征圆满完成，因为特定词是否存在于文档中这个指标可以很好的标识文档的主题内容。
+
+#### 4.1.1 词袋
+
+1. 在词袋特征化中，一篇文本文档被转换为一个计数向量，这个计数向量包含`词汇表`中所有可能出现的单词
+2. 词袋将一个文本文档转换为一个扁平向量之所以说这个向量是“扁平的”，是因为它不包含原始文本中的任何结构，原始文本是一个单词序列，但词袋中没有任何序列，它只记录每个单词在文本中出现的次数。因此向量中单词的顺序根本不重要，只要它在数据集的所有文档之间保持一致即可
+3. 词袋也不表示任何单词层次，在词袋中，每个单词都是平等的元素
+4. 在词袋表示中，重要的是特征空间中的数据分布.在词袋向量中，每个单词都是向量的一个维度。如果词汇表中有n个单词，那么一篇文档就是n维空间中的一个点
+5. 词袋的缺点是，将句子分解为单词会破坏语义
+
+#### 4.1.2 
+
+1. n 元词袋(bag-of-n-grams)是词袋的一种自然扩展，n-gram(n元词)是由n个标记(token)组成的序列。1-gram 就是一个单词(word)，又称为一元词(unigram)。经过分词(tokenization)之后，计数机制会将单独标记转换为单词计数，或将有重叠的序列作为 n-gram 进行计数。
+2. n-gram 能够更多地保留文本的初始序列结构，因此 n 元词袋表示法可以表达更丰富的信息
+3. 然而，并不是没有代价，理论上，有k个不同的单词，就会有 $k^{2}$ 个不同的 2-gram(二元词)，实际上，没有这么多，因为并不是每个单词都可以跟在另一个单词后面
+4. n-gram(n > 1)一般来说也会比单词多得多，这意味着 n 元词袋是一个更大也更稀疏的特征空间，也意味着 n 元词袋需要更强的计算、存储、建模能力。n 越大，能表示的信息越丰富，相应的成本也会越高
+
+```python
+import pandas
+import json
+from sklearn.feature_extraction.text import CountVectorizer
+
+js = []
+with open("yelp_academic_dataset_review.json") as f:
+    for i in range(10000):
+        js.append(json.loads(f.readline()))
+
+review_df = pd.DataFrame(js)
+```
+
+
+
+
+### 4.2 使用过滤获取清洁特征
+
+#### 4.2.1 停用词
+
+* 停用词
+    - 中文停用词
+        + 网上找
+    - 英文停用词
+        + NLTK
+* 分词
+    - 中文分词
+    - 英文分词
+        + 不能省略撇号
+        + 单词为小写
+
+
+#### 4.2.2 基于频率的过滤
 
 
 ## 6.Imbalanced Sample
